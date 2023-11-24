@@ -1,4 +1,10 @@
 /* USER CODE BEGIN Header */
+/*
+ A00834027 Roberto Ivan Estrada
+ A01660619 Jeffry Emanuel Granados Johnson
+ A00834003 Dafne Naomi Reyes Pimentel
+ A00828736 Rodolfo Alejandro Hernandez Ibarra
+ */
 /**
   ******************************************************************************
   * @file           : main.c
@@ -24,6 +30,13 @@
 /* USER CODE BEGIN Includes */
 #include "myprintf.h"
 #include "lcd.h"
+
+// #include <stddef.h>
+// #include <stdio.h>
+// #include "EngTrModel.h" /* Model's header file */
+// #include "rtwtypes.h"
+
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -46,6 +59,10 @@ osThreadId defaultTaskHandle;
 osThreadId ReadMatricialHandle;
 osThreadId ReadADCHandle;
 osThreadId PrintLCDHandle;
+
+
+osMessageQId msgQueueHandle;
+
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -64,6 +81,7 @@ void USER_GPIO_Init_ADC(void);
 void USER_USART1_Init(void);
 void USER_USART1_Transmit(uint8_t *pData, uint16_t size);
 
+void USER_LCD_Init(void);
 void barrido(void);
 
 void USER_ADC_Init(void);
@@ -74,7 +92,7 @@ void StartDefaultTask(void const * argument);
 void readMatricial(void const * argument);
 void readADC(void const * argument);
 void printLCD(void const * argument);
-
+void printState(void const * argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -107,6 +125,8 @@ int main(void)
   /* Configure the system clock */
   SystemClock_Config();
 
+
+
   /* USER CODE BEGIN SysInit */
 
   /* USER CODE END SysInit */
@@ -116,6 +136,12 @@ int main(void)
   /* USER CODE BEGIN 2 */
   USER_RCC_Init();
   USER_GPIO_Init();
+//
+//  USER_USART1_Init();
+//
+//  USER_ADC_Init();
+//  USER_ADC_Calibration();
+//  ADC1->CR2	|=	 ADC_CR2_ADON;//	starts the conversion
 
   /* USER CODE END 2 */
 
@@ -132,23 +158,24 @@ int main(void)
   /* USER CODE END RTOS_TIMERS */
 
   /* USER CODE BEGIN RTOS_QUEUES */
-  /* add queues, ... */
+  osMessageQDef(msgQueue, 4, uint32_t);
+  msgQueueHandle = osMessageCreate(osMessageQ(msgQueue), NULL);
   /* USER CODE END RTOS_QUEUES */
-
   /* Create the thread(s) */
   /* definition and creation of defaultTask */
   osThreadDef(defaultTask, StartDefaultTask, osPriorityIdle, 0, 128);
   defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
-	osThreadDef(readMatricial, ReadMatricialHandle, osPriorityHigh, 0, 256);
-	ReadMatricialHandle = osThreadCreate(osThread(readMatricial), NULL);
+  osThreadDef(MatricialTask, readMatricial, osPriorityNormal, 0, 128*2);
+  ReadMatricialHandle = osThreadCreate(osThread(MatricialTask), NULL);
 
-	osThreadDef(readADC, ReadADCHandle, osPriorityNormal, 0, 256);
-	ReadADCHandle = osThreadCreate(osThread(readADC), NULL);
+  osThreadDef(ADCTask, readADC, osPriorityNormal, 0, 512);
+  ReadADCHandle = osThreadCreate(osThread(ADCTask), NULL);
 
-	osThreadDef(printLCD, PrintLCDHandle, osPriorityAboveNormal, 0, 256);
-	PrintLCDHandle = osThreadCreate(osThread(printLCD), NULL);
+  osThreadDef(LCDTask, printLCD, osPriorityIdle, 0, 512);
+  PrintLCDHandle = osThreadCreate(osThread(LCDTask), NULL);
+
 	/* USER CODE END RTOS_THREADS */
 
   /* Start scheduler */
@@ -228,15 +255,16 @@ static void MX_GPIO_Init(void)
 
 /* GENERAL FUNCTIONS */
 void USER_RCC_Init(void){
+
   RCC->APB2ENR |= RCC_APB2ENR_IOPAEN; // I/O port A clock enable
   RCC->APB2ENR |= RCC_APB2ENR_IOPBEN;//		I/O port B clock enable
+  RCC->APB2ENR |= RCC_APB2ENR_IOPCEN;//		I/O port C clock enable
 //  -------UART--------------
   RCC->APB2ENR |= RCC_APB2ENR_USART1EN; // USART1 clock enable
 //  --------ADC--------------
   RCC->APB2ENR |=	 RCC_APB2ENR_ADC1EN;//	ADC 1 clock enable
   RCC->CFGR |=	 RCC_CFGR_ADCPRE;  //	ADC prescaler 1:8 for 8 MHz
-  //Timer 2 and 3 clock enable
-  RCC->APB1ENR	|=	 RCC_APB1ENR_TIM3EN | RCC_APB1ENR_TIM2EN; //TIM2 AND TIM3 ENABLE
+
 }
 void USER_GPIO_Init(void){
 	USER_GPIO_Init_UART();
@@ -259,10 +287,10 @@ void USER_GPIO_Init_Matricial(void){
 	GPIOA->CRL &= ~GPIO_CRL_CNF5 & ~GPIO_CRL_MODE5_1;
 	GPIOA->CRL |= GPIO_CRL_MODE5_0;
 
-	//PA10 as input pull-up -horizontal
-	GPIOA->CRH &= ~GPIO_CRH_MODE10 & ~GPIO_CRH_CNF10_0;
-	GPIOA->CRH |= GPIO_CRH_CNF10_1;
-	GPIOA->ODR |= GPIO_ODR_ODR10;
+	//PA12 as input pull-up -horizontal
+	GPIOA->CRH &= ~GPIO_CRH_MODE12 & ~GPIO_CRH_CNF12_0;
+	GPIOA->CRH |= GPIO_CRH_CNF12_1;
+	GPIOA->ODR |= GPIO_ODR_ODR12;
 	//PA6 as input pull-up -horizontal
 	GPIOA->CRL &= ~GPIO_CRL_MODE6 & ~GPIO_CRL_CNF6_0;
 	GPIOA->CRL |= GPIO_CRL_CNF6_1;
@@ -300,6 +328,8 @@ void USER_GPIO_Init_ADC(){
 	//PA1 (TIM2_CH2) as alternate function push-pull, max speed 10MHz
 	GPIOA->CRL	&=	~GPIO_CRL_CNF1_0 & ~GPIO_CRL_MODE1_1;
 	GPIOA->CRL	|=	 GPIO_CRL_CNF1_1 | GPIO_CRL_MODE1_0;
+	//PA2 (ADC12_IN2) as analog
+	GPIOA->CRL	&=	~GPIO_CRL_CNF2 & ~GPIO_CRL_MODE2;
 }
 
 /* UART FUNCTIONS */
@@ -323,78 +353,75 @@ void USER_USART1_Transmit(uint8_t *pData, uint16_t size){
 
 /* MATRICIAL FUNCTIONS */
 
+void USER_LCD_Init(void){
+	LCD_Init( );//				inicializamos la libreria del LCD
+	LCD_Cursor_ON( );//			cursor visible activo
+	LCD_Clear( );//			borra la pantalla
+}
+
+
 void barrido(void){
 	//ROWS
-	//	  	 PA 10,6,11,7
+	//	  	 PA 12,6,11,7
 	//	  First Column
 	GPIOB->ODR &= ~GPIO_ODR_ODR3;
 	GPIOB->ODR |= GPIO_ODR_ODR4;
 	GPIOB->ODR |= GPIO_ODR_ODR5;
 	GPIOB->ODR |= GPIO_ODR_ODR10;
 
-	if(!(GPIOA->IDR & GPIO_IDR_IDR10)){ //1
+	if(!(GPIOA->IDR & GPIO_IDR_IDR12)){ //1
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		LCD_Put_Str("1");
-		printf("Turn Signal Left\n");
-		while(!(GPIOA->IDR & GPIO_IDR_IDR10)){}
+		printf("Turn Signal Left\n\r");
+		while(!(GPIOA->IDR & GPIO_IDR_IDR12)){}
 		HAL_Delay(10);
 	}
 	if(!(GPIOA->IDR & GPIO_IDR_IDR6)){ //4
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		LCD_Put_Str("4");
-		printf("Left\n");
+		printf("Left\n\r");
 		while(!(GPIOA->IDR & GPIO_IDR_IDR6)){}
 		HAL_Delay(10);
 	}
 	if(!(GPIOA->IDR & GPIO_IDR_IDR11)){ //7
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		LCD_Put_Str("7");
 		//printf("");
 		while(!(GPIOA->IDR & GPIO_IDR_IDR11)){}
 		HAL_Delay(10);
 	}
 	if(!(GPIOA->IDR & GPIO_IDR_IDR7)){ //* delete
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		LCD_Cursor_Left();
-		LCD_Put_Str(" ");
 		//printf("");
-		LCD_Cursor_Left();
 		while(!(GPIOA->IDR & GPIO_IDR_IDR7)){}
 		HAL_Delay(10);
 	}
 
 	//ROWS
-	//	  	 PA 10,6,11,7
+	//	  	 PA 12,6,11,7
 	//Second Column
 	GPIOB->ODR |= GPIO_ODR_ODR3;
 	GPIOB->ODR &= ~GPIO_ODR_ODR4;
 	GPIOB->ODR |= GPIO_ODR_ODR5;
 	GPIOB->ODR |= GPIO_ODR_ODR10;
 
-	if(!(GPIOA->IDR & GPIO_IDR_IDR10)){ //2
+	if(!(GPIOA->IDR & GPIO_IDR_IDR12)){ //2
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		LCD_Put_Str("2");
-		printf("Forward\n");
-		while(!(GPIOA->IDR & GPIO_IDR_IDR10)){}
+		printf("Forward\n\r");
+		while(!(GPIOA->IDR & GPIO_IDR_IDR12)){}
 		HAL_Delay(10);
 	}
 	if(!(GPIOA->IDR & GPIO_IDR_IDR6)){ //5
 	  GPIOA->ODR ^= GPIO_ODR_ODR5;
-	  LCD_Put_Str("5");
-	  printf("Braking\n");
+	  printf("Braking\n\r");
 	  while(!(GPIOA->IDR & GPIO_IDR_IDR6)){}
 	  HAL_Delay(10);
 	}
 	if(!(GPIOA->IDR & GPIO_IDR_IDR11)){ //8
 	  GPIOA->ODR ^= GPIO_ODR_ODR5;
-	  LCD_Put_Str("8");
-	  printf("Backward\n");
+	  printf("Backward\n\r");
 	  while(!(GPIOA->IDR & GPIO_IDR_IDR11)){}
 	  HAL_Delay(10);
 	}
 	if(!(GPIOA->IDR & GPIO_IDR_IDR7)){ //0
 	  GPIOA->ODR ^= GPIO_ODR_ODR5;
-	  LCD_Put_Str("0");
 	  //printf("");
 	  while(!(GPIOA->IDR & GPIO_IDR_IDR7)){}
 	  HAL_Delay(10);
@@ -406,30 +433,26 @@ void barrido(void){
 	GPIOB->ODR &= ~GPIO_ODR_ODR5;
 	GPIOB->ODR |= GPIO_ODR_ODR10;
 
-	if(!(GPIOA->IDR & GPIO_IDR_IDR10)){ //3
+	if(!(GPIOA->IDR & GPIO_IDR_IDR12)){ //3
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		LCD_Put_Str("3");
-		printf("Turn Signal Right\n");
-		while(!(GPIOA->IDR & GPIO_IDR_IDR10)){}
+		printf("Turn Signal Right\n\r");
+		while(!(GPIOA->IDR & GPIO_IDR_IDR12)){}
 		HAL_Delay(10);
 	}
 	if(!(GPIOA->IDR & GPIO_IDR_IDR6)){ //6
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		LCD_Put_Str("6");
-		printf("Right\n");
+		printf("Right\n\r");
 		while(!(GPIOA->IDR & GPIO_IDR_IDR6)){}
 		HAL_Delay(10);
 	}
 	if(!(GPIOA->IDR & GPIO_IDR_IDR11)){ //9
 		  GPIOA->ODR ^= GPIO_ODR_ODR5;
-		  LCD_Put_Str("9");
 		  //printf();
 		  while(!(GPIOA->IDR & GPIO_IDR_IDR11)){}
 		  HAL_Delay(10);
 	}
 	if(!(GPIOA->IDR & GPIO_IDR_IDR7)){ //# space
 		  GPIOA->ODR ^= GPIO_ODR_ODR5;
-		  LCD_Put_Str(" ");
 		  //printf("");
 		  while(!(GPIOA->IDR & GPIO_IDR_IDR7)){}
 		  HAL_Delay(10);
@@ -441,31 +464,27 @@ void barrido(void){
 	GPIOB->ODR |= GPIO_ODR_ODR5;
 	GPIOB->ODR &= ~GPIO_ODR_ODR10;
 
-	if(!(GPIOA->IDR & GPIO_IDR_IDR10)){ //A
+	if(!(GPIOA->IDR & GPIO_IDR_IDR12)){ //A
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		LCD_Put_Str("A");
-		printf("Drive Mode\n");
-		while(!(GPIOA->IDR & GPIO_IDR_IDR10)){}
+		printf("Drive Mode\n\r");
+		while(!(GPIOA->IDR & GPIO_IDR_IDR12)){}
 		HAL_Delay(10);
 	  }
 	if(!(GPIOA->IDR & GPIO_IDR_IDR6)){ //B
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		LCD_Put_Str("B");
-		printf("Neutral Mode\n");
+		printf("Neutral Mode\n\r");
 		while(!(GPIOA->IDR & GPIO_IDR_IDR6)){}
 		HAL_Delay(10);
 	}
 	if(!(GPIOA->IDR & GPIO_IDR_IDR11)){ //C
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		LCD_Put_Str("C");
-		printf("Reverse Mode\n");
+		printf("Reverse Mode\n\r");
 		while(!(GPIOA->IDR & GPIO_IDR_IDR11)){}
 		HAL_Delay(10);
 	}
 	if(!(GPIOA->IDR & GPIO_IDR_IDR7)){ //D
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		LCD_Put_Str("D");
-		printf("D1 Mode\n");
+		printf("D1 Mode\n\r");
 		while(!(GPIOA->IDR & GPIO_IDR_IDR7)){}
 		HAL_Delay(10);
 	}
@@ -503,41 +522,99 @@ uint16_t USER_ADC_Read( void ){
 /* USER CODE END Header_StartDefaultTask */
 void StartDefaultTask(void const * argument)
 {
-  /* USER CODE BEGIN 5 */
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+	osDelay(1);
   }
   /* USER CODE END 5 */
-}
 
+}
 void readMatricial(void const * argument){
 	/* USER CODE BEGIN 5 */
-	  /* Infinite loop */
-	  for(;;)
-	  {
-	    osDelay(1);
-	  }
-	  /* USER CODE END 5 */
+	uint32_t counter = 0;
+	uint32_t temp;
+	/* Infinite loop */
+	USER_USART1_Init();
+
+	printf("Tt\r\n");
+	for(;;)
+	{
+	  barrido();
+	  osDelay(50);
+	  // temp=osKernelSysTick()-(50*counter++);
+	  //osDelay(50-temp);
+	  //temp = osKernelSysTick();
+	  //osDelay(50 - (temp - (50 * counter++)));
+	}
+	/* USER CODE END 5 */
 }
+
 void readADC(void const * argument){
 	/* USER CODE BEGIN 5 */
+	uint32_t counter = 0;
+	uint32_t temp;
+	uint32_t msg;
+
+	float dataADC = 0;
+	float converted = 0;
+
+	USER_ADC_Init();
+	USER_ADC_Calibration();
+	ADC1->CR2	|=	 ADC_CR2_ADON;//	starts the conversion
+
 	  /* Infinite loop */
-	  for(;;)
-	  {
-	    osDelay(1);
-	  }
+	for(;;)
+	{
+	  dataADC = USER_ADC_Read();
+	  converted = 100*(dataADC/((pow(2,12)-1)));
+	  msg = (uint32_t)floor(converted);
+	  osMessagePut(msgQueueHandle, msg, 0);
+//	  temp = osKernelSysTick() - (100 * counter++);
+	  osDelay(1);
+	}
 	  /* USER CODE END 5 */
 }
-void printADC(void const * argument){
+
+void printLCD(void const * argument){
 	/* USER CODE BEGIN 5 */
-	  /* Infinite loop */
-	  for(;;)
-	  {
-	    osDelay(1);
-	  }
-	  /* USER CODE END 5 */
+	uint32_t counter = 0;
+	uint32_t temp;
+	int valorAnterior = 0;
+	int value, valorCambiado;
+	osEvent r_event;
+
+	LCD_Init( );//				inicializamos la libreria del LCD
+	LCD_Cursor_ON( );//			cursor visible activo
+	LCD_Clear( );//			borra la pantalla
+	LCD_Set_Cursor( 1,0);
+
+	/* Infinite loop */
+	for(;;)
+	{
+		r_event = osMessageGet(msgQueueHandle, 100);
+		if( r_event.status == osEventMessage )
+			value = r_event.value.v;
+
+		 valorCambiado = 0;
+			  // Comprobar si el valor ha cambiado
+		 if (value < (valorAnterior - 3) || value > (valorAnterior + 3)) {
+				  valorCambiado = 1;
+		 }
+		if (valorCambiado) {
+				  LCD_Clear();
+				  LCD_Set_Cursor(1, 0);
+				  LCD_Put_Str("V ->");
+				  LCD_Set_Cursor(2, 0);
+				  LCD_Put_Num(value);
+				  LCD_Put_Str("%");
+				  HAL_Delay(200);
+				  valorAnterior = value;
+			  }
+//		temp = osKernelSysTick() - (100 * counter++);
+		osDelay(1);
+	}
+	/* USER CODE END 5 */
 }
 
 
@@ -577,6 +654,8 @@ void Error_Handler(void)
   }
   /* USER CODE END Error_Handler_Debug */
 }
+
+
 
 #ifdef  USE_FULL_ASSERT
 /**
