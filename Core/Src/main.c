@@ -1,3 +1,5 @@
+//speed, rpm, gear, modo(switch), teclado
+
 /* USER CODE BEGIN Header */
 /*
  A00834027 Roberto Ivan Estrada
@@ -31,10 +33,10 @@
 #include "myprintf.h"
 #include "lcd.h"
 
-// #include <stddef.h>
-// #include <stdio.h>
-// #include "EngTrModel.h" /* Model's header file */
-// #include "rtwtypes.h"
+ #include <stddef.h>
+ #include <stdio.h>
+ #include "EngTrModel.h" /* Model's header file */
+ #include "rtwtypes.h"
 
 
 /* USER CODE END Includes */
@@ -58,10 +60,21 @@
 osThreadId defaultTaskHandle;
 osThreadId ReadMatricialHandle;
 osThreadId ReadADCHandle;
-osThreadId PrintLCDHandle;
+osThreadId ReadControlHandle;
+osThreadId ReadStateHandle;
+osThreadId SendLCDHandle;
+osThreadId SendDataHandle;
 
+
+//speed, rpm, gear, modo(switch), teclado(pendiente)
+uint32_t lecturas[4];
 
 osMessageQId msgQueueHandle;
+osMessageQId speedQueueHandle;
+osMessageQId engineQueueHandle;
+osMessageQId gearQueueHandle;
+
+
 
 /* USER CODE BEGIN PV */
 
@@ -91,8 +104,11 @@ uint16_t USER_ADC_Read( void );
 void StartDefaultTask(void const * argument);
 void readMatricial(void const * argument);
 void readADC(void const * argument);
-void printLCD(void const * argument);
-void printState(void const * argument);
+void readState(void const * argument);
+void readControl(void const *argument);
+void sendLCD(void const * argument);
+void sendData(void const * argument);
+
 
 /* USER CODE BEGIN PFP */
 
@@ -160,6 +176,16 @@ int main(void)
   /* USER CODE BEGIN RTOS_QUEUES */
   osMessageQDef(msgQueue, 4, uint32_t);
   msgQueueHandle = osMessageCreate(osMessageQ(msgQueue), NULL);
+
+  osMessageQDef(speedQueue, 4, uint32_t);
+  msgQueueHandle = osMessageCreate(osMessageQ(speedQueue), NULL);
+
+  osMessageQDef(engineQueue, 4, uint32_t);
+  msgQueueHandle = osMessageCreate(osMessageQ(engineQueue), NULL);
+
+  osMessageQDef(gearQueue, 4, uint32_t);
+  msgQueueHandle = osMessageCreate(osMessageQ(gearQueue), NULL);
+
   /* USER CODE END RTOS_QUEUES */
   /* Create the thread(s) */
   /* definition and creation of defaultTask */
@@ -169,12 +195,24 @@ int main(void)
   /* USER CODE BEGIN RTOS_THREADS */
   osThreadDef(MatricialTask, readMatricial, osPriorityNormal, 0, 128*2);
   ReadMatricialHandle = osThreadCreate(osThread(MatricialTask), NULL);
-
+//
   osThreadDef(ADCTask, readADC, osPriorityNormal, 0, 512);
   ReadADCHandle = osThreadCreate(osThread(ADCTask), NULL);
+//
+  osThreadDef(readStateTask, readState, osPriorityNormal, 0, 256);
+  ReadStateHandle = osThreadCreate(osThread(readStateTask), NULL);
 
-  osThreadDef(LCDTask, printLCD, osPriorityIdle, 0, 512);
-  PrintLCDHandle = osThreadCreate(osThread(LCDTask), NULL);
+  osThreadDef(readControlTask, readControl, osPriorityNormal, 0, 256);
+  ReadStateHandle = osThreadCreate(osThread(readControlTask), NULL);
+
+  osThreadDef(LCDTask, sendLCD, osPriorityNormal, 0, 512);
+  SendLCDHandle = osThreadCreate(osThread(LCDTask), NULL);
+
+  osThreadDef(sendDataTask, sendData, osPriorityNormal, 0, 512);
+  SendDataHandle = osThreadCreate(osThread(sendDataTask), NULL);
+
+
+
 
 	/* USER CODE END RTOS_THREADS */
 
@@ -254,8 +292,8 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 
 /* GENERAL FUNCTIONS */
-void USER_RCC_Init(void){
 
+void USER_RCC_Init(void){
   RCC->APB2ENR |= RCC_APB2ENR_IOPAEN; // I/O port A clock enable
   RCC->APB2ENR |= RCC_APB2ENR_IOPBEN;//		I/O port B clock enable
   RCC->APB2ENR |= RCC_APB2ENR_IOPCEN;//		I/O port C clock enable
@@ -279,6 +317,16 @@ void USER_GPIO_Init_UART(void){
 	// Pin PA10 (RX)
 	GPIOA->CRH &= ~GPIO_CRH_CNF10;
 	GPIOA->CRH |= GPIO_CRH_CNF10_0;
+}
+
+void USER_USART1_Init(void){
+  USART1->CR1 |= USART_CR1_UE; // USART enabled
+  USART1->CR1 &= ~USART_CR1_M; // 1 start bit, 8 data bits
+  USART1->CR1 &= ~USART_CR1_PCE; // Parity control disabled
+  USART1->CR2 &= ~USART_CR2_STOP; // 1 stop bit
+  USART1->BRR = 0x22C; // 115200 bps 34.72
+  USART1->CR1 |= USART_CR1_TE; // Transmitter enabled
+  USART1->CR1 |= USART_CR1_RE;// receiver enabled
 }
 
 void USER_GPIO_Init_Matricial(void){
@@ -329,19 +377,11 @@ void USER_GPIO_Init_ADC(){
 	GPIOA->CRL	&=	~GPIO_CRL_CNF1_0 & ~GPIO_CRL_MODE1_1;
 	GPIOA->CRL	|=	 GPIO_CRL_CNF1_1 | GPIO_CRL_MODE1_0;
 	//PA2 (ADC12_IN2) as analog
-	GPIOA->CRL	&=	~GPIO_CRL_CNF2 & ~GPIO_CRL_MODE2;
+//	GPIOA->CRL	&	~GPIOIO_CRL_CNF2 & ~GPIO_CRL_MODE2;
 }
 
-/* UART FUNCTIONS */
+void USER_GPIO_Init_Brake(){
 
-void USER_USART1_Init(void){
-  USART1->CR1 |= USART_CR1_UE; // USART enabled
-  USART1->CR1 &= ~USART_CR1_M; // 1 start bit, 8 data bits
-  USART1->CR1 &= ~USART_CR1_PCE; // Parity control disabled
-  USART1->CR2 &= ~USART_CR2_STOP; // 1 stop bit
-  USART1->BRR = 0x22C; // 115200 bps 34.72
-  USART1->CR1 |= USART_CR1_TE; // Transmitter enabled
-  USART1->CR1 |= USART_CR1_RE;// receiver enabled
 }
 
 void USER_USART1_Transmit(uint8_t *pData, uint16_t size){
@@ -351,7 +391,6 @@ void USER_USART1_Transmit(uint8_t *pData, uint16_t size){
   }
 }
 
-/* MATRICIAL FUNCTIONS */
 
 void USER_LCD_Init(void){
 	LCD_Init( );//				inicializamos la libreria del LCD
@@ -359,6 +398,209 @@ void USER_LCD_Init(void){
 	LCD_Clear( );//			borra la pantalla
 }
 
+
+
+
+void USER_ADC_Init(void){
+	ADC1->CR1	&=	~ADC_CR1_DUALMOD;//	independent mode
+	ADC1->CR2	&=	~ADC_CR2_ALIGN;//	right alignment for the result
+	ADC1->CR2	|=	 ADC_CR2_CONT;//	continuous conversion mode
+	ADC1->SMPR2	&=	~ADC_SMPR2_SMP0;//	1.5 cycles channel sample time
+	ADC1->SQR1	&=	~ADC_SQR1_L;//		1 conversion on regular channels
+	ADC1->SQR3 	&=	~ADC_SQR3_SQ1;//	first and only conversion in Ch0
+	ADC1->CR2	|=	 ADC_CR2_ADON;//	ADC enabled
+	HAL_Delay(1);//					tstab(1us) after ADC enabled, real 1ms
+}
+void USER_ADC_Calibration(void){
+	ADC1->CR2	|=	 ADC_CR2_CAL;//		start calibration
+	while( ADC1->CR2 & ADC_CR2_CAL );//		wait until calibration is done
+}
+uint16_t USER_ADC_Read( void ){
+	while( !( ADC1->SR & ADC_SR_EOC ) );//		wait until conversion is done
+	return (uint16_t)ADC1->DR;//			return ADC data
+}
+
+/* USER CODE END 4 */
+
+/* USER CODE BEGIN Header_StartDefaultTask */
+/**
+  * @brief  Function implementing the defaultTask thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_StartDefaultTask */
+void StartDefaultTask(void const * argument)
+{
+  /* Infinite loop */
+  for(;;)
+  {
+	osDelay(1);
+  }
+  /* USER CODE END 5 */
+
+}
+
+/*
+INPUT FUNCTIONS
+ */
+
+void readMatricial(void const * argument){
+	/* USER CODE BEGIN 5 */
+	uint32_t counter = 0;
+	uint32_t temp;
+	/* Infinite loop */
+	USER_USART1_Init();
+
+	printf("Tt\r\n");
+	for(;;)
+	{
+	  barrido();
+	  osDelay(50);
+	}
+	/* USER CODE END 5 */
+}
+
+void readADC(void const * argument){
+	/* USER CODE BEGIN 5 */
+	/*
+	 El dispositivo deberá recibir una señal analógica
+	 de un potenciómetro para el acelerador.
+	 */
+
+	uint32_t msg;
+	float dataADC = 0;
+	float converted = 0;
+
+	USER_ADC_Init();
+	USER_ADC_Calibration();
+	ADC1->CR2	|=	 ADC_CR2_ADON;//	starts the conversion
+
+	  /* Infinite loop */
+	for(;;)
+	{
+	  dataADC = USER_ADC_Read();
+	  converted = 100*(dataADC/((pow(2,12)-1)));
+	  msg = (uint32_t)floor(converted);
+//	  EngTrModel_U.Throttle = msg;	//Actualizamos la velocidad del acelerador
+//	  EngTrModel_U.BrakeTorque = 0.0; //Paramos de frenar
+	  osMessagePut(msgQueueHandle, msg, 0);
+	  osDelay(5);
+	}
+	  /* USER CODE END 5 */
+}
+
+void readState(void const * argument){
+	EngTrModel_initialize();
+	  /* Infinite loop */
+
+	for(;;)
+	{
+		EngTrModel_step();
+
+
+		printf("Vehicle Speed: %f\r\n", EngTrModel_Y.VehicleSpeed);
+		printf("Engine Speed: %f\r\n", EngTrModel_Y.EngineSpeed);
+		printf("Gear: %f\r\n", EngTrModel_Y.Gear);
+		osDelay(40);
+	}
+}
+
+void readControl(void const * argument){
+	osEvent r_event;
+	uint32_t value;
+	for(;;){
+		r_event = osMessageGet(msgQueueHandle, 10);
+		if( r_event.status == osEventMessage )
+			value = r_event.value.v;
+
+		if(!(GPIOC->IDR & GPIO_IDR_IDR13)){
+			EngTrModel_U.Throttle = 2.0;
+			EngTrModel_U.BrakeTorque = 100.0;
+		}
+		else{
+			EngTrModel_U.Throttle = value;
+//			printf("%d\n\r", value);
+			EngTrModel_U.BrakeTorque = 0.0;
+		}
+		osDelay(1);
+	}
+}
+
+/*	OUTPUT FUNCTIONS	*/
+
+void sendLCD(void const * argument){
+	/* USER CODE BEGIN 5 */
+	/*
+	 El dispositivo deberá mostrar las RPM actuales
+	 del motor, la velocidad del vehículo, la marcha y
+	 el acelerador en la pantalla principal de 16x2, , utilizando las
+	 unidades correctas y con el espacio correcto.
+	 Mostrará los valores actuales
+	 * */
+
+	uint32_t counter = 0;
+	uint32_t temp;
+	int valorAnterior = 0;
+	int value, valorCambiado;
+	osEvent r_event;
+
+	LCD_Init( );//				inicializamos la libreria del LCD
+	LCD_Cursor_ON( );//			cursor visible activo
+	LCD_Clear( );//			borra la pantalla
+	LCD_Set_Cursor( 1,0);
+
+	/* Infinite loop */
+	for(;;)
+	{
+		r_event = osMessagePeek(msgQueueHandle, 100);
+		if( r_event.status == osEventMessage )
+			value = r_event.value.v;
+
+		 valorCambiado = 0;
+			  // Comprobar si el valor ha cambiado
+		 if (value < (valorAnterior - 3) || value > (valorAnterior + 3)) {
+				  valorCambiado = 1;
+		 }
+		if (valorCambiado) {
+				  LCD_Clear();
+				  LCD_Set_Cursor(1, 0);
+				  LCD_Put_Str("V ->");
+				  LCD_Set_Cursor(2, 0);
+				  LCD_Put_Num(value);
+				  LCD_Put_Str("%");
+				  HAL_Delay(200);
+				  valorAnterior = value;
+		}
+//		temp = osKernelSysTick() - (100 * counter++);
+		osDelay(1);
+	}
+	/* USER CODE END 5 */
+}
+
+void sendData(void const * argument){
+	////speed, rpm, gear, modo(switch), teclado
+
+	/*
+	  El dispositivo deberá mostrar las RPM del motor, la velocidad del vehículo,
+	   la marcha y el acelerador en la pantalla secundaria en un formato gráfico
+	   con datos históricos.
+	   El gráfico mostrará variables vs tiempo con resolución de 500 ms.
+	   Con datos historicos.
+	 */
+
+	for(;;)
+	{
+//		printf("RPM: ,");
+//		printf("Vehicle Speed: ,");
+//		printf("Gear: ,");
+//		printf("Throttle: \n\r");
+		printf("SENDING DATA\n\r");
+		osDelay(500);
+	}
+
+}
+
+/*	PROCESS FUNCTIONS	*/
 
 void barrido(void){
 	//ROWS
@@ -488,133 +730,6 @@ void barrido(void){
 		while(!(GPIOA->IDR & GPIO_IDR_IDR7)){}
 		HAL_Delay(10);
 	}
-}
-
-/* ADC FUNCTIONS */
-
-void USER_ADC_Init(void){
-	ADC1->CR1	&=	~ADC_CR1_DUALMOD;//	independent mode
-	ADC1->CR2	&=	~ADC_CR2_ALIGN;//	right alignment for the result
-	ADC1->CR2	|=	 ADC_CR2_CONT;//	continuous conversion mode
-	ADC1->SMPR2	&=	~ADC_SMPR2_SMP0;//	1.5 cycles channel sample time
-	ADC1->SQR1	&=	~ADC_SQR1_L;//		1 conversion on regular channels
-	ADC1->SQR3 	&=	~ADC_SQR3_SQ1;//	first and only conversion in Ch0
-	ADC1->CR2	|=	 ADC_CR2_ADON;//	ADC enabled
-	HAL_Delay(1);//					tstab(1us) after ADC enabled, real 1ms
-}
-void USER_ADC_Calibration(void){
-	ADC1->CR2	|=	 ADC_CR2_CAL;//		start calibration
-	while( ADC1->CR2 & ADC_CR2_CAL );//		wait until calibration is done
-}
-uint16_t USER_ADC_Read( void ){
-	while( !( ADC1->SR & ADC_SR_EOC ) );//		wait until conversion is done
-	return (uint16_t)ADC1->DR;//			return ADC data
-}
-
-/* USER CODE END 4 */
-
-/* USER CODE BEGIN Header_StartDefaultTask */
-/**
-  * @brief  Function implementing the defaultTask thread.
-  * @param  argument: Not used
-  * @retval None
-  */
-/* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void const * argument)
-{
-  /* Infinite loop */
-  for(;;)
-  {
-	osDelay(1);
-  }
-  /* USER CODE END 5 */
-
-}
-void readMatricial(void const * argument){
-	/* USER CODE BEGIN 5 */
-	uint32_t counter = 0;
-	uint32_t temp;
-	/* Infinite loop */
-	USER_USART1_Init();
-
-	printf("Tt\r\n");
-	for(;;)
-	{
-	  barrido();
-	  osDelay(50);
-	  // temp=osKernelSysTick()-(50*counter++);
-	  //osDelay(50-temp);
-	  //temp = osKernelSysTick();
-	  //osDelay(50 - (temp - (50 * counter++)));
-	}
-	/* USER CODE END 5 */
-}
-
-void readADC(void const * argument){
-	/* USER CODE BEGIN 5 */
-	uint32_t counter = 0;
-	uint32_t temp;
-	uint32_t msg;
-
-	float dataADC = 0;
-	float converted = 0;
-
-	USER_ADC_Init();
-	USER_ADC_Calibration();
-	ADC1->CR2	|=	 ADC_CR2_ADON;//	starts the conversion
-
-	  /* Infinite loop */
-	for(;;)
-	{
-	  dataADC = USER_ADC_Read();
-	  converted = 100*(dataADC/((pow(2,12)-1)));
-	  msg = (uint32_t)floor(converted);
-	  osMessagePut(msgQueueHandle, msg, 0);
-//	  temp = osKernelSysTick() - (100 * counter++);
-	  osDelay(1);
-	}
-	  /* USER CODE END 5 */
-}
-
-void printLCD(void const * argument){
-	/* USER CODE BEGIN 5 */
-	uint32_t counter = 0;
-	uint32_t temp;
-	int valorAnterior = 0;
-	int value, valorCambiado;
-	osEvent r_event;
-
-	LCD_Init( );//				inicializamos la libreria del LCD
-	LCD_Cursor_ON( );//			cursor visible activo
-	LCD_Clear( );//			borra la pantalla
-	LCD_Set_Cursor( 1,0);
-
-	/* Infinite loop */
-	for(;;)
-	{
-		r_event = osMessageGet(msgQueueHandle, 100);
-		if( r_event.status == osEventMessage )
-			value = r_event.value.v;
-
-		 valorCambiado = 0;
-			  // Comprobar si el valor ha cambiado
-		 if (value < (valorAnterior - 3) || value > (valorAnterior + 3)) {
-				  valorCambiado = 1;
-		 }
-		if (valorCambiado) {
-				  LCD_Clear();
-				  LCD_Set_Cursor(1, 0);
-				  LCD_Put_Str("V ->");
-				  LCD_Set_Cursor(2, 0);
-				  LCD_Put_Num(value);
-				  LCD_Put_Str("%");
-				  HAL_Delay(200);
-				  valorAnterior = value;
-			  }
-//		temp = osKernelSysTick() - (100 * counter++);
-		osDelay(1);
-	}
-	/* USER CODE END 5 */
 }
 
 
