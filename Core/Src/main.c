@@ -63,16 +63,16 @@ osThreadId ReadADCHandle;
 osThreadId ReadControlHandle;
 osThreadId ReadStateHandle;
 osThreadId SendLCDHandle;
-osThreadId SendDataHandle;
+//osThreadId SendDataHandle;
 
 
 //speed, rpm, gear, modo(switch), teclado(pendiente)
-uint32_t lecturas[4];
+uint32_t data[5] = {0,0,0,0,0};
 
 osMessageQId msgQueueHandle;
-osMessageQId speedQueueHandle;
-osMessageQId engineQueueHandle;
-osMessageQId gearQueueHandle;
+//osMessageQId speedQueueHandle;
+//osMessageQId engineQueueHandle;
+//osMessageQId gearQueueHandle;
 
 
 
@@ -106,8 +106,10 @@ void readMatricial(void const * argument);
 void readADC(void const * argument);
 void readState(void const * argument);
 void readControl(void const *argument);
+
+void readAll(void const * argument);
 void sendLCD(void const * argument);
-void sendData(void const * argument);
+//void sendData(void const * argument);
 
 
 /* USER CODE BEGIN PFP */
@@ -177,19 +179,19 @@ int main(void)
   osMessageQDef(msgQueue, 4, uint32_t);
   msgQueueHandle = osMessageCreate(osMessageQ(msgQueue), NULL);
 
-  osMessageQDef(speedQueue, 4, uint32_t);
-  msgQueueHandle = osMessageCreate(osMessageQ(speedQueue), NULL);
-
-  osMessageQDef(engineQueue, 4, uint32_t);
-  msgQueueHandle = osMessageCreate(osMessageQ(engineQueue), NULL);
-
-  osMessageQDef(gearQueue, 4, uint32_t);
-  msgQueueHandle = osMessageCreate(osMessageQ(gearQueue), NULL);
+//  osMessageQDef(speedQueue, 4, uint32_t);
+//  msgQueueHandle = osMessageCreate(osMessageQ(speedQueue), NULL);
+//
+//  osMessageQDef(engineQueue, 4, uint32_t);
+//  msgQueueHandle = osMessageCreate(osMessageQ(engineQueue), NULL);
+//
+//  osMessageQDef(gearQueue, 4, uint32_t);
+//  msgQueueHandle = osMessageCreate(osMessageQ(gearQueue), NULL);
 
   /* USER CODE END RTOS_QUEUES */
   /* Create the thread(s) */
   /* definition and creation of defaultTask */
-  osThreadDef(defaultTask, StartDefaultTask, osPriorityIdle, 0, 128);
+  osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 128);
   defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
@@ -208,8 +210,8 @@ int main(void)
   osThreadDef(LCDTask, sendLCD, osPriorityNormal, 0, 512);
   SendLCDHandle = osThreadCreate(osThread(LCDTask), NULL);
 
-  osThreadDef(sendDataTask, sendData, osPriorityNormal, 0, 512);
-  SendDataHandle = osThreadCreate(osThread(sendDataTask), NULL);
+//  osThreadDef(sendDataTask, sendData, osPriorityNormal, 0, 256);
+//  SendDataHandle = osThreadCreate(osThread(sendDataTask), NULL);
 
 
 
@@ -380,10 +382,6 @@ void USER_GPIO_Init_ADC(){
 //	GPIOA->CRL	&	~GPIOIO_CRL_CNF2 & ~GPIO_CRL_MODE2;
 }
 
-void USER_GPIO_Init_Brake(){
-
-}
-
 void USER_USART1_Transmit(uint8_t *pData, uint16_t size){
   for (int i = 0; i < size; i++){
     while ((USART1->SR & USART_SR_TXE) == 0){} // Wait until transmit register is empty
@@ -434,7 +432,12 @@ void StartDefaultTask(void const * argument)
   /* Infinite loop */
   for(;;)
   {
-	osDelay(1);
+	printf("Vehicle Speed: %ld,", data[0]);
+	printf("Engine Speed: %ld,", data[1]);
+	printf("Gear: %ld,", data[2]);
+	printf("Throttle: %ld,", data[3]);
+	printf("Mode: %ld\n\r", data[4]);
+	osDelay(100);
   }
   /* USER CODE END 5 */
 
@@ -483,7 +486,8 @@ void readADC(void const * argument){
 	  msg = (uint32_t)floor(converted);
 //	  EngTrModel_U.Throttle = msg;	//Actualizamos la velocidad del acelerador
 //	  EngTrModel_U.BrakeTorque = 0.0; //Paramos de frenar
-	  osMessagePut(msgQueueHandle, msg, 0);
+//	  osMessagePut(msgQueueHandle, msg, 0);
+	  data[3] = msg;
 	  osDelay(5);
 	}
 	  /* USER CODE END 5 */
@@ -496,11 +500,13 @@ void readState(void const * argument){
 	for(;;)
 	{
 		EngTrModel_step();
+		data[0] = EngTrModel_Y.VehicleSpeed;
+		data[1] = EngTrModel_Y.EngineSpeed;
+		data[2] = EngTrModel_Y.Gear;
 
-
-		printf("Vehicle Speed: %f\r\n", EngTrModel_Y.VehicleSpeed);
-		printf("Engine Speed: %f\r\n", EngTrModel_Y.EngineSpeed);
-		printf("Gear: %f\r\n", EngTrModel_Y.Gear);
+//		printf("Vehicle Speed: %f\r\n", EngTrModel_Y.VehicleSpeed);
+//		printf("Engine Speed: %f\r\n", EngTrModel_Y.EngineSpeed);
+//		printf("Gear: %f\r\n", EngTrModel_Y.Gear);
 		osDelay(40);
 	}
 }
@@ -509,9 +515,11 @@ void readControl(void const * argument){
 	osEvent r_event;
 	uint32_t value;
 	for(;;){
-		r_event = osMessageGet(msgQueueHandle, 10);
-		if( r_event.status == osEventMessage )
-			value = r_event.value.v;
+//		r_event = osMessageGet(msgQueueHandle, 10);
+//		if( r_event.status == osEventMessage )
+//			value = r_event.value.v;
+
+		value = data[3];
 
 		if(!(GPIOC->IDR & GPIO_IDR_IDR13)){
 			EngTrModel_U.Throttle = 2.0;
@@ -525,6 +533,7 @@ void readControl(void const * argument){
 		osDelay(1);
 	}
 }
+
 
 /*	OUTPUT FUNCTIONS	*/
 
@@ -552,9 +561,10 @@ void sendLCD(void const * argument){
 	/* Infinite loop */
 	for(;;)
 	{
-		r_event = osMessagePeek(msgQueueHandle, 100);
-		if( r_event.status == osEventMessage )
-			value = r_event.value.v;
+//		r_event = osMessagePeek(msgQueueHandle, 100);
+//		if( r_event.status == osEventMessage )
+//			value = r_event.value.v;
+		value = data[3];
 
 		 valorCambiado = 0;
 			  // Comprobar si el valor ha cambiado
@@ -577,28 +587,28 @@ void sendLCD(void const * argument){
 	/* USER CODE END 5 */
 }
 
-void sendData(void const * argument){
-	////speed, rpm, gear, modo(switch), teclado
-
-	/*
-	  El dispositivo deberá mostrar las RPM del motor, la velocidad del vehículo,
-	   la marcha y el acelerador en la pantalla secundaria en un formato gráfico
-	   con datos históricos.
-	   El gráfico mostrará variables vs tiempo con resolución de 500 ms.
-	   Con datos historicos.
-	 */
-
-	for(;;)
-	{
-//		printf("RPM: ,");
-//		printf("Vehicle Speed: ,");
-//		printf("Gear: ,");
-//		printf("Throttle: \n\r");
-		printf("SENDING DATA\n\r");
-		osDelay(500);
-	}
-
-}
+//void sendData(void const * argument){
+//	////speed, rpm, gear, modo(switch), teclado
+//
+//	/*
+//	  El dispositivo deberá mostrar las RPM del motor, la velocidad del vehículo,
+//	   la marcha y el acelerador en la pantalla secundaria en un formato gráfico
+//	   con datos históricos.
+//	   El gráfico mostrará variables vs tiempo con resolución de 500 ms.
+//	   Con datos historicos.
+//	 */
+//
+//	for(;;)
+//	{
+////		printf("RPM: ,");
+////		printf("Vehicle Speed: ,");
+////		printf("Gear: ,");
+////		printf("Throttle: \n\r");
+//		printf("SENDING DATA\n\r");
+//		osDelay(500);
+//	}
+//
+//}
 
 /*	PROCESS FUNCTIONS	*/
 
