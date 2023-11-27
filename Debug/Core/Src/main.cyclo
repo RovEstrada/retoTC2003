@@ -17,7 +17,7 @@
 ../Core/Src/main.c:466:6:readADC	1
 ../Core/Src/main.c:496:6:readState	1
 ../Core/Src/main.c:514:6:readControl	2
-../Core/Src/main.c:540:6:sendLCD	4
-../Core/Src/main.c:615:6:barrido	33
-../Core/Src/main.c:754:6:HAL_TIM_PeriodElapsedCallback	2
-../Core/Src/main.c:772:6:Error_Handler	1
+../Core/Src/main.c:540:6:sendLCD	7
+../Core/Src/main.c:626:6:barrido	33
+../Core/Src/main.c:765:6:HAL_TIM_PeriodElapsedCallback	2
+../Core/Src/main.c:783:6:Error_Handler	1

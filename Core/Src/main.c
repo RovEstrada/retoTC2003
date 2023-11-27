@@ -67,7 +67,7 @@ osThreadId SendLCDHandle;
 
 
 //speed, rpm, gear, modo(switch), teclado(pendiente)
-uint32_t data[5] = {0,0,0,0,0};
+uint32_t data[5] = {};
 
 osMessageQId msgQueueHandle;
 //osMessageQId speedQueueHandle;
@@ -437,7 +437,7 @@ void StartDefaultTask(void const * argument)
 	printf("Gear: %ld,", data[2]);
 	printf("Throttle: %ld,", data[3]);
 	printf("Mode: %ld\n\r", data[4]);
-	osDelay(100);
+	osDelay(500);
   }
   /* USER CODE END 5 */
 
@@ -547,11 +547,9 @@ void sendLCD(void const * argument){
 	 Mostrará los valores actuales
 	 * */
 
-	uint32_t counter = 0;
-	uint32_t temp;
-	int valorAnterior = 0;
-	int value, valorCambiado;
-	osEvent r_event;
+	uint32_t valorAnterior[5];
+	uint32_t value[5], valorCambiado;
+//	osEvent r_event;
 
 	LCD_Init( );//				inicializamos la libreria del LCD
 	LCD_Cursor_ON( );//			cursor visible activo
@@ -564,25 +562,37 @@ void sendLCD(void const * argument){
 //		r_event = osMessagePeek(msgQueueHandle, 100);
 //		if( r_event.status == osEventMessage )
 //			value = r_event.value.v;
-		value = data[3];
+		for(int i = 0; i < 5; i++)
+			value[i] = data[i];
 
 		 valorCambiado = 0;
 			  // Comprobar si el valor ha cambiado
-		 if (value < (valorAnterior - 3) || value > (valorAnterior + 3)) {
+		 for(int i = 0; i < 5; i++){
+			 if (value[i] < (valorAnterior[i] - 3) || value[i] > (valorAnterior[i] + 3)) {
 				  valorCambiado = 1;
+				  break;
+			 }
 		 }
 		if (valorCambiado) {
 				  LCD_Clear();
 				  LCD_Set_Cursor(1, 0);
-				  LCD_Put_Str("V ->");
+				  LCD_Put_Str("VS:");
+				  LCD_Put_Num(value[0]);
+				  LCD_Put_Str(" ES:");
+				  LCD_Put_Num(value[1]);
 				  LCD_Set_Cursor(2, 0);
-				  LCD_Put_Num(value);
-				  LCD_Put_Str("%");
-				  HAL_Delay(200);
-				  valorAnterior = value;
+				  LCD_Put_Str("GR:");;
+				  LCD_Put_Num(value[2]);
+				  LCD_Put_Str(" TH:");
+				  LCD_Put_Num(value[3]);
+				  LCD_Put_Str(" MD:");
+				  LCD_Put_Num(dato);
+
+				  for(int i = 0; i < 5; i++)
+					  valorAnterior[i] = value[i];
 		}
 //		temp = osKernelSysTick() - (100 * counter++);
-		osDelay(1);
+		osDelay(200);
 	}
 	/* USER CODE END 5 */
 }
