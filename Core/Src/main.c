@@ -67,7 +67,7 @@ osThreadId SendLCDHandle;
 
 
 //speed, rpm, gear, modo(switch), teclado(pendiente)
-uint32_t data[5] = {};
+uint32_t data[6] = {};
 
 osMessageQId msgQueueHandle;
 //osMessageQId speedQueueHandle;
@@ -337,6 +337,17 @@ void USER_GPIO_Init_Matricial(void){
 	GPIOA->CRL &= ~GPIO_CRL_CNF5 & ~GPIO_CRL_MODE5_1;
 	GPIOA->CRL |= GPIO_CRL_MODE5_0;
 
+	//PINES MODOS as input pull-up -horizontal
+	GPIOC->CRL &= ~GPIO_CRL_MODE1 & ~GPIO_CRL_CNF1_0;
+	GPIOC->CRL |= GPIO_CRL_CNF1_1;
+	GPIOC->ODR |= GPIO_ODR_ODR1;
+
+	GPIOC->CRL &= ~GPIO_CRL_MODE2 & ~GPIO_CRL_CNF2_0;
+	GPIOC->CRL |= GPIO_CRL_CNF2_1;
+	GPIOC->ODR |= GPIO_ODR_ODR2;
+
+
+
 	//PA12 as input pull-up -horizontal
 	GPIOA->CRH &= ~GPIO_CRH_MODE12 & ~GPIO_CRH_CNF12_0;
 	GPIOA->CRH |= GPIO_CRH_CNF12_1;
@@ -436,7 +447,8 @@ void StartDefaultTask(void const * argument)
 	printf("Engine Speed: %ld,", data[1]);
 	printf("Gear: %ld,", data[2]);
 	printf("Throttle: %ld,", data[3]);
-	printf("Mode: %ld\n\r", data[4]);
+	printf("Mode: %ld,", data[4]);
+	printf("Orientation: %ld\n\r", data[5]);
 	osDelay(500);
   }
   /* USER CODE END 5 */
@@ -547,8 +559,8 @@ void sendLCD(void const * argument){
 	 Mostrará los valores actuales
 	 * */
 
-	uint32_t valorAnterior[5];
-	uint32_t value[5], valorCambiado;
+	uint32_t valorAnterior[6];
+	uint32_t value[6], valorCambiado;
 //	osEvent r_event;
 
 	LCD_Init( );//				inicializamos la libreria del LCD
@@ -586,7 +598,7 @@ void sendLCD(void const * argument){
 				  LCD_Put_Str(" TH:");
 				  LCD_Put_Num(value[3]);
 				  LCD_Put_Str(" MD:");
-				  LCD_Put_Num(dato);
+				  LCD_Put_Num(value[4]);
 
 				  for(int i = 0; i < 5; i++)
 					  valorAnterior[i] = value[i];
@@ -623,6 +635,38 @@ void sendLCD(void const * argument){
 /*	PROCESS FUNCTIONS	*/
 
 void barrido(void){
+	//PINES DE MODO
+
+//	int switchState1 = HAL_GPIO_ReadPin(SWITCH_1_PORT, SWITCH_1_PIN);
+//	int switchState2 = HAL_GPIO_ReadPin(SWITCH_2_PORT, SWITCH_2_PIN);
+
+	int switchState1 = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1);
+	int switchState2 = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
+
+	if (switchState1 == GPIO_PIN_RESET && switchState2 == GPIO_PIN_SET)
+	{
+		data[4] = 4;
+	}
+	else if(switchState1 == GPIO_PIN_RESET && switchState2 == GPIO_PIN_RESET)
+	{
+		data[4] = 3;
+	}
+	else if(switchState1 == GPIO_PIN_SET && switchState2 == GPIO_PIN_RESET)
+	{
+		data[4] = 2;
+	}
+	else if(switchState1 == GPIO_PIN_SET && switchState2 == GPIO_PIN_SET)
+	{
+		data[4] = 1;
+	}
+	else{
+		data[4] = 0;
+	}
+
+
+
+
+
 	//ROWS
 	//	  	 PA 12,6,11,7
 	//	  First Column
@@ -633,13 +677,14 @@ void barrido(void){
 
 	if(!(GPIOA->IDR & GPIO_IDR_IDR12)){ //1
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		printf("Turn Signal Left\n\r");
+//		printf("Turn Signal Left\n\r");
 		while(!(GPIOA->IDR & GPIO_IDR_IDR12)){}
 		HAL_Delay(10);
 	}
 	if(!(GPIOA->IDR & GPIO_IDR_IDR6)){ //4
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		printf("Left\n\r");
+//		printf("Left\n\r");
+		data[5] = 4;
 		while(!(GPIOA->IDR & GPIO_IDR_IDR6)){}
 		HAL_Delay(10);
 	}
@@ -666,19 +711,21 @@ void barrido(void){
 
 	if(!(GPIOA->IDR & GPIO_IDR_IDR12)){ //2
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		printf("Forward\n\r");
+//		printf("Forward\n\r");
+		data[5] = 1;
 		while(!(GPIOA->IDR & GPIO_IDR_IDR12)){}
 		HAL_Delay(10);
 	}
 	if(!(GPIOA->IDR & GPIO_IDR_IDR6)){ //5
 	  GPIOA->ODR ^= GPIO_ODR_ODR5;
-	  printf("Braking\n\r");
+//	  printf("Braking\n\r");
 	  while(!(GPIOA->IDR & GPIO_IDR_IDR6)){}
 	  HAL_Delay(10);
 	}
 	if(!(GPIOA->IDR & GPIO_IDR_IDR11)){ //8
 	  GPIOA->ODR ^= GPIO_ODR_ODR5;
-	  printf("Backward\n\r");
+//	  printf("Backward\n\r");
+	  data[5] = 3;
 	  while(!(GPIOA->IDR & GPIO_IDR_IDR11)){}
 	  HAL_Delay(10);
 	}
@@ -697,13 +744,14 @@ void barrido(void){
 
 	if(!(GPIOA->IDR & GPIO_IDR_IDR12)){ //3
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		printf("Turn Signal Right\n\r");
+//		printf("Turn Signal Right\n\r");
 		while(!(GPIOA->IDR & GPIO_IDR_IDR12)){}
 		HAL_Delay(10);
 	}
 	if(!(GPIOA->IDR & GPIO_IDR_IDR6)){ //6
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		printf("Right\n\r");
+//		printf("Right\n\r");
+		data[5] = 2;
 		while(!(GPIOA->IDR & GPIO_IDR_IDR6)){}
 		HAL_Delay(10);
 	}
@@ -728,25 +776,25 @@ void barrido(void){
 
 	if(!(GPIOA->IDR & GPIO_IDR_IDR12)){ //A
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		printf("Drive Mode\n\r");
+//		printf("Drive Mode\n\r");
 		while(!(GPIOA->IDR & GPIO_IDR_IDR12)){}
 		HAL_Delay(10);
 	  }
 	if(!(GPIOA->IDR & GPIO_IDR_IDR6)){ //B
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		printf("Neutral Mode\n\r");
+//		printf("Neutral Mode\n\r");
 		while(!(GPIOA->IDR & GPIO_IDR_IDR6)){}
 		HAL_Delay(10);
 	}
 	if(!(GPIOA->IDR & GPIO_IDR_IDR11)){ //C
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		printf("Reverse Mode\n\r");
+//		printf("Reverse Mode\n\r");
 		while(!(GPIOA->IDR & GPIO_IDR_IDR11)){}
 		HAL_Delay(10);
 	}
 	if(!(GPIOA->IDR & GPIO_IDR_IDR7)){ //D
 		GPIOA->ODR ^= GPIO_ODR_ODR5;
-		printf("D1 Mode\n\r");
+//		printf("D1 Mode\n\r");
 		while(!(GPIOA->IDR & GPIO_IDR_IDR7)){}
 		HAL_Delay(10);
 	}
