@@ -542,7 +542,7 @@ void readControl(void const * argument){
 //			printf("%d\n\r", value);
 			EngTrModel_U.BrakeTorque = 0.0;
 		}
-		osDelay(1);
+		osDelay(10);
 	}
 }
 
